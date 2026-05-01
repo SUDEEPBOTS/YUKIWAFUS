@@ -32,3 +32,5 @@ CLAIM_COOLDOWN  = int(os.getenv("CLAIM_COOLDOWN", "86400"))   # 24h in seconds
 # ── Bot Settings ──────────────────────────────────────────────────────────────
 BANNED_USERS    = set()
 
+WAIFU_PICS = ["https://files.catbox.moe/08ge3a.jpg"]
+FIRE_EMOJI = "🔥"
