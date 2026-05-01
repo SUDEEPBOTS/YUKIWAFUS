@@ -44,7 +44,7 @@ async def set_chat_spawn(chat_id: int, enabled: bool):
     )
 
 
-def get_next_target(chat_id: int) -> int:
+async def get_next_target(chat_id: int) -> int:          # ✅ async fix
     doc = await chatsdb.find_one({"chat_id": chat_id})
     custom = doc.get("spawn_after", SPAWN_AFTER) if doc else SPAWN_AFTER
     base = custom + random.randint(-SPAWN_VARY, SPAWN_VARY)
@@ -62,7 +62,7 @@ async def count_messages(client: Client, message: Message):
     # Init
     if chat_id not in message_counts:
         message_counts[chat_id] = 0
-        spawn_targets[chat_id] = get_next_target(chat_id)
+        spawn_targets[chat_id] = await get_next_target(chat_id)  # ✅ await
 
     message_counts[chat_id] += 1
 
@@ -73,7 +73,7 @@ async def count_messages(client: Client, message: Message):
     # Time to spawn?
     if message_counts[chat_id] >= spawn_targets[chat_id]:
         message_counts[chat_id] = 0
-        spawn_targets[chat_id] = get_next_target(chat_id)
+        spawn_targets[chat_id] = await get_next_target(chat_id)  # ✅ await
         asyncio.create_task(spawn_waifu(client, chat_id))
 
 
@@ -124,7 +124,7 @@ async def spawn_waifu(client: Client, chat_id: int):
             except Exception:
                 pass
 
-    except Exception as e:
+    except Exception:
         active_spawns.pop(chat_id, None)
 
 
@@ -202,4 +202,4 @@ async def setspawn_handler(client: Client, message: Message):
         f"✅ {sc('Spawn rate set to')} <b>{count} {sc('messages')}</b>!",
         parse_mode=enums.ParseMode.HTML,
     )
-
+    
