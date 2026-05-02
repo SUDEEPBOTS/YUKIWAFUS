@@ -32,7 +32,7 @@
 
 ## ✨ Features
 
-<img align="right" src="https://files.catbox.moe/ey2jzp.jpeg" width="180px"/>
+<img align="right" src="https://i.ibb.co/ShfRh0D/63d4ec4a046f49e5340ade54a9bd2407.jpg" width="180px"/>
 
 - 🌸 **Auto Spawn** — Waifus spawn after N group messages
 - 🎯 **Smart Guess** — Fuzzy name matching, multi-word support
