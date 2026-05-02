@@ -14,6 +14,7 @@ from pyrogram.types import (
 from YUKIWAFUS import app
 from YUKIWAFUS.database.Mangodb import collectiondb, balancedb, game_statsdb
 from YUKIWAFUS.utils.api import get_random_waifu
+from YUKIWAFUS.utils.safe_photo import safe_reply_photo
 
 # ── Import shared spawn state from spawn.py ───────────────────────────────────
 from YUKIWAFUS.modules.WAIFU.spawn import active_spawns
@@ -179,7 +180,8 @@ async def guess_handler(client: Client, message: Message):
             [InlineKeyboardButton("🌸 My Harem", switch_inline_query_current_chat=f"col.{user_id}")]
         ])
 
-        await message.reply_photo(
+        await safe_reply_photo(
+            message,
             photo=waifu["img_url"],
             caption=(
                 f"<blockquote>🎊 <b><a href='tg://user?id={user_id}'>{escape(message.from_user.first_name)}</a></b> guessed correctly!</blockquote>\n\n"
@@ -189,7 +191,6 @@ async def guess_handler(client: Client, message: Message):
                 f"🪙 <b>+{COINS_REWARD} coins</b> → Balance: <b>{new_balance}</b>\n"
                 f"⏱ Time: <b>{time_taken}s</b>"
             ),
-            parse_mode=enums.ParseMode.HTML,
             reply_markup=keyboard,
         )
     else:
