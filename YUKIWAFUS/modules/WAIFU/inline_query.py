@@ -60,8 +60,9 @@ async def _get_all_global() -> list:
 
 
 def _build_collection_caption(waifu: dict, owner_name: str, count: int) -> str:
-    rarity = waifu.get("rarity", "Common")
-    emoji  = RARITY_EMOJI.get(rarity, "◈")
+    rarity   = waifu.get("rarity", "Common")
+    emoji    = RARITY_EMOJI.get(rarity, "◈")
+    waifu_id = waifu.get("waifu_id", "N/A")
     return (
         f"<blockquote>"
         f"<b>🌸 {escape(owner_name)}'s Collection</b>"
@@ -69,20 +70,23 @@ def _build_collection_caption(waifu: dict, owner_name: str, count: int) -> str:
         f"<b>📛 Name :</b> {escape(waifu.get('name', '?'))}\n"
         f"<b>{emoji} Rarity :</b> {rarity}\n"
         f"<b>🏷 Tag :</b> {waifu.get('event_tag', 'Standard')}\n"
+        f"<b>🆔 ID :</b> <code>{waifu_id}</code>\n"
         f"<b>✖ Count :</b> ×{count}"
     )
 
 
 def _build_global_caption(waifu: dict) -> str:
-    rarity = waifu.get("rarity", "Common")
-    emoji  = RARITY_EMOJI.get(rarity, "◈")
+    rarity   = waifu.get("rarity", "Common")
+    emoji    = RARITY_EMOJI.get(rarity, "◈")
+    waifu_id = waifu.get("waifu_id", "N/A")
     return (
         f"<blockquote>"
         f"<b>🌸 Waifu Info</b>"
         f"</blockquote>\n\n"
         f"<b>📛 Name :</b> {escape(waifu.get('name', '?'))}\n"
         f"<b>{emoji} Rarity :</b> {rarity}\n"
-        f"<b>🏷 Tag :</b> {waifu.get('event_tag', 'Standard')}"
+        f"<b>🏷 Tag :</b> {waifu.get('event_tag', 'Standard')}\n"
+        f"<b>🆔 ID :</b> <code>{waifu_id}</code>"
     )
 
 
@@ -141,7 +145,7 @@ async def inline_handler(client: Client, query: InlineQuery):
             next_offset    = str(offset + len(page)) if len(page) == RESULTS_PER_PAGE else ""
 
             try:
-                user      = await client.get_users(user_id)
+                user       = await client.get_users(user_id)
                 owner_name = user.first_name
             except Exception:
                 owner_name = "User"
@@ -214,6 +218,6 @@ async def inline_handler(client: Client, query: InlineQuery):
             is_personal=raw.startswith("col."),
         )
 
-    except Exception as e:
+    except Exception:
         await query.answer(_empty_result(), cache_time=5)
-  
+            
