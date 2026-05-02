@@ -132,7 +132,7 @@ async def spawn_waifu(client: Client, chat_id: int):
 @app.on_message(filters.command("spawnon") & filters.group)
 async def spawnon_handler(client: Client, message: Message):
     member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status.value not in ("administrator", "owner"):
+    if member.status.value not in ("administrator", "creator"):
         return await message.reply_text(f"❌ {sc('Admins only!')}")
 
     await set_chat_spawn(message.chat.id, True)
@@ -142,7 +142,7 @@ async def spawnon_handler(client: Client, message: Message):
 @app.on_message(filters.command("spawnoff") & filters.group)
 async def spawnoff_handler(client: Client, message: Message):
     member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status.value not in ("administrator", "owner"):
+    if member.status.value not in ("administrator", "creator"):
         return await message.reply_text(f"❌ {sc('Admins only!')}")
 
     await set_chat_spawn(message.chat.id, False)
@@ -157,7 +157,11 @@ async def fspawn_handler(client: Client, message: Message):
     if chat_id in active_spawns:
         return await message.reply_text(f"⚠️ {sc('A waifu is already active here!')}")
 
-    await message.delete()
+    try:
+        await message.delete()
+    except Exception:
+        pass  # Bot might not have delete permission in group — that's fine
+
     asyncio.create_task(spawn_waifu(client, chat_id))
 
 
@@ -165,7 +169,7 @@ async def fspawn_handler(client: Client, message: Message):
 @app.on_message(filters.command("setspawn") & filters.group)
 async def setspawn_handler(client: Client, message: Message):
     member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status.value not in ("administrator", "owner"):
+    if member.status.value not in ("administrator", "creator"):
         return await message.reply_text(f"❌ {sc('Admins only!')}")
 
     if len(message.command) < 2:
@@ -202,4 +206,4 @@ async def setspawn_handler(client: Client, message: Message):
         f"✅ {sc('Spawn rate set to')} <b>{count} {sc('messages')}</b>!",
         parse_mode=enums.ParseMode.HTML,
     )
-    
+
