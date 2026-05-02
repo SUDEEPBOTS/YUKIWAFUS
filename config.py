@@ -63,7 +63,7 @@ BANNED_USERS    = set()
 
 WAIFU_PICS = [
     url.strip()
-    for url in _str("WAIFU_PICS", "https://files.catbox.moe/08ge3a.jpg").split(",")
+    for url in _str("WAIFU_PICS", "https://i.ibb.co/x8tCyc9n/4a3347e4f573589a9bf8b2740f68a70a.jpg").split(",")
     if url.strip()
 ]
 
