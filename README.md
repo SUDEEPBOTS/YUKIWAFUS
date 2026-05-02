@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://i.ibb.co/x8tCyc9n/4a3347e4f573589a9bf8b2740f68a70a.jpg" width="200px" style="border-radius: 50%"/>
+<img src="https://i.ibb.co/x8tCyc9n/4a3347e4f573589a9bf8b2740f68a70a.jpg" width="280px" style="border-radius: 50%"/>
 
 # 🌸 YUKIWAFUS
 
