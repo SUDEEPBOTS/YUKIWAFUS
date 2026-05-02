@@ -44,10 +44,8 @@ async def set_chat_spawn(chat_id: int, enabled: bool):
     )
 
 
-async def get_next_target(chat_id: int) -> int:          # ✅ async fix
-    doc = await chatsdb.find_one({"chat_id": chat_id})
-    custom = doc.get("spawn_after", SPAWN_AFTER) if doc else SPAWN_AFTER
-    base = custom + random.randint(-SPAWN_VARY, SPAWN_VARY)
+def get_next_target(chat_id: int) -> int:
+    base = SPAWN_AFTER + random.randint(-SPAWN_VARY, SPAWN_VARY)
     return message_counts.get(chat_id, 0) + max(5, base)
 
 
@@ -59,11 +57,10 @@ async def count_messages(client: Client, message: Message):
     if not await is_chat_enabled(chat_id):
         return
 
-    # Init — set both immediately before any await to avoid race condition
+    # Init
     if chat_id not in message_counts:
         message_counts[chat_id] = 0
-        spawn_targets[chat_id] = SPAWN_AFTER   # safe default before await
-        spawn_targets[chat_id] = await get_next_target(chat_id)
+        spawn_targets[chat_id] = get_next_target(chat_id)
 
     message_counts[chat_id] += 1
 
@@ -72,9 +69,9 @@ async def count_messages(client: Client, message: Message):
         return
 
     # Time to spawn?
-    if message_counts[chat_id] >= spawn_targets.get(chat_id, SPAWN_AFTER):
+    if message_counts[chat_id] >= spawn_targets[chat_id]:
         message_counts[chat_id] = 0
-        spawn_targets[chat_id] = await get_next_target(chat_id)  # ✅ await
+        spawn_targets[chat_id] = get_next_target(chat_id)
         asyncio.create_task(spawn_waifu(client, chat_id))
 
 
@@ -83,13 +80,6 @@ async def spawn_waifu(client: Client, chat_id: int):
     waifu = await get_random_waifu()
     if not waifu:
         return
-
-    # Clear old guessed state so new waifu can be guessed
-    try:
-        from YUKIWAFUS.modules.WAIFU.guess import guessed_chats
-        guessed_chats.discard(chat_id)
-    except Exception:
-        pass
 
     rarity = waifu.get("rarity", "Common")
     emoji  = RARITY_EMOJI.get(rarity, "◈")
@@ -132,7 +122,7 @@ async def spawn_waifu(client: Client, chat_id: int):
             except Exception:
                 pass
 
-    except Exception:
+    except Exception as e:
         active_spawns.pop(chat_id, None)
 
 
@@ -140,7 +130,7 @@ async def spawn_waifu(client: Client, chat_id: int):
 @app.on_message(filters.command("spawnon") & filters.group)
 async def spawnon_handler(client: Client, message: Message):
     member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status.value not in ("administrator", "creator"):
+    if member.status.value not in ("administrator", "owner"):
         return await message.reply_text(f"❌ {sc('Admins only!')}")
 
     await set_chat_spawn(message.chat.id, True)
@@ -150,7 +140,7 @@ async def spawnon_handler(client: Client, message: Message):
 @app.on_message(filters.command("spawnoff") & filters.group)
 async def spawnoff_handler(client: Client, message: Message):
     member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status.value not in ("administrator", "creator"):
+    if member.status.value not in ("administrator", "owner"):
         return await message.reply_text(f"❌ {sc('Admins only!')}")
 
     await set_chat_spawn(message.chat.id, False)
@@ -165,54 +155,6 @@ async def fspawn_handler(client: Client, message: Message):
     if chat_id in active_spawns:
         return await message.reply_text(f"⚠️ {sc('A waifu is already active here!')}")
 
-    try:
-        await message.delete()
-    except Exception:
-        pass  # Bot might not have delete permission in group — that's fine
-
+    await message.delete()
     asyncio.create_task(spawn_waifu(client, chat_id))
-
-
-# ── /setspawn ─────────────────────────────────────────────────────────────────
-@app.on_message(filters.command("setspawn") & filters.group)
-async def setspawn_handler(client: Client, message: Message):
-    member = await client.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status.value not in ("administrator", "creator"):
-        return await message.reply_text(f"❌ {sc('Admins only!')}")
-
-    if len(message.command) < 2:
-        current = SPAWN_AFTER
-        doc = await chatsdb.find_one({"chat_id": message.chat.id})
-        if doc and doc.get("spawn_after"):
-            current = doc["spawn_after"]
-        return await message.reply_text(
-            f"ℹ️ {sc('Current spawn rate')}: <b>{current} {sc('messages')}</b>\n\n"
-            f"{sc('Usage')}: <code>/setspawn &lt;number&gt;</code>\n"
-            f"{sc('Example')}: <code>/setspawn 30</code>",
-            parse_mode=enums.ParseMode.HTML,
-        )
-
-    try:
-        count = int(message.command[1])
-        if count < 5:
-            return await message.reply_text(f"❌ {sc('Minimum is 5 messages.')}")
-        if count > 500:
-            return await message.reply_text(f"❌ {sc('Maximum is 500 messages.')}")
-    except ValueError:
-        return await message.reply_text(f"❌ {sc('Enter a valid number.')}")
-
-    await chatsdb.update_one(
-        {"chat_id": message.chat.id},
-        {"$set": {"spawn_after": count}},
-        upsert=True,
-    )
-
-    # Update in-memory target
-    spawn_targets[message.chat.id] = message_counts.get(message.chat.id, 0) + count
-
-    await message.reply_text(
-        f"✅ {sc('Spawn rate set to')} <b>{count} {sc('messages')}</b>!",
-        parse_mode=enums.ParseMode.HTML,
-    )
-
     
