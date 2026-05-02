@@ -59,10 +59,11 @@ async def count_messages(client: Client, message: Message):
     if not await is_chat_enabled(chat_id):
         return
 
-    # Init
+    # Init — set both immediately before any await to avoid race condition
     if chat_id not in message_counts:
         message_counts[chat_id] = 0
-        spawn_targets[chat_id] = await get_next_target(chat_id)  # ✅ await
+        spawn_targets[chat_id] = SPAWN_AFTER   # safe default before await
+        spawn_targets[chat_id] = await get_next_target(chat_id)
 
     message_counts[chat_id] += 1
 
@@ -71,7 +72,7 @@ async def count_messages(client: Client, message: Message):
         return
 
     # Time to spawn?
-    if message_counts[chat_id] >= spawn_targets[chat_id]:
+    if message_counts[chat_id] >= spawn_targets.get(chat_id, SPAWN_AFTER):
         message_counts[chat_id] = 0
         spawn_targets[chat_id] = await get_next_target(chat_id)  # ✅ await
         asyncio.create_task(spawn_waifu(client, chat_id))
