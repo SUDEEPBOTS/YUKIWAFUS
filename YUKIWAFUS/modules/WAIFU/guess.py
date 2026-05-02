@@ -1,7 +1,5 @@
 import asyncio
 import time
-import random
-from datetime import datetime
 from html import escape
 
 from pyrogram import Client, enums, filters
@@ -13,19 +11,17 @@ from pyrogram.types import (
 
 from YUKIWAFUS import app
 from YUKIWAFUS.database.Mangodb import collectiondb, balancedb, game_statsdb
-from YUKIWAFUS.utils.api import get_random_waifu
-from YUKIWAFUS.utils.safe_photo import safe_reply_photo
+from YUKIWAFUS.utils.helpers import sc
 
-# ── Import shared spawn state from spawn.py ───────────────────────────────────
-from YUKIWAFUS.modules.WAIFU.spawn import active_spawns
+from YUKIWAFUS.modules.WAIFU.spawn import active_spawns, _blocked_users
 
-# ── In-memory state ───────────────────────────────────────────────────────────
-guessed_chats: set = set()     # chat_ids where waifu already guessed
-cooldowns: dict = {}           # user_id → last_guess timestamp
+# ── In-memory ─────────────────────────────────────────────────────────────────
+guessed_chats: set  = set()
+cooldowns:     dict = {}
 
-COOLDOWN_SEC = 10
-COINS_REWARD = 40
-WAIFU_TIMEOUT = 120            # waifu runs away after 2 min
+COOLDOWN_SEC  = 10
+COINS_REWARD  = 40
+WAIFU_TIMEOUT = 120
 
 RARITY_EMOJI = {
     "Common":    "⚪",
@@ -38,30 +34,66 @@ RARITY_EMOJI = {
 
 
 # ── Cooldown helpers ──────────────────────────────────────────────────────────
-def is_on_cooldown(user_id: int) -> bool:
-    last = cooldowns.get(user_id, 0)
-    return (time.time() - last) < COOLDOWN_SEC
+def _on_cooldown(user_id: int) -> bool:
+    return (time.time() - cooldowns.get(user_id, 0)) < COOLDOWN_SEC
 
-def remaining_cooldown(user_id: int) -> int:
-    last = cooldowns.get(user_id, 0)
-    return max(0, int(COOLDOWN_SEC - (time.time() - last)))
+def _remaining_cd(user_id: int) -> int:
+    return max(0, int(COOLDOWN_SEC - (time.time() - cooldowns.get(user_id, 0))))
 
-def set_cooldown(user_id: int):
+def _set_cooldown(user_id: int):
     cooldowns[user_id] = time.time()
 
 
+# ── Spam block check ──────────────────────────────────────────────────────────
+def _spam_blocked(chat_id: int, user_id: int) -> int:
+    key     = (chat_id, user_id)
+    unblock = _blocked_users.get(key)
+    if unblock:
+        remaining = unblock - time.time()
+        if remaining > 0:
+            return int(remaining)
+        _blocked_users.pop(key, None)
+    return 0
+
+
+# ── Smart name matching ───────────────────────────────────────────────────────
+def _normalize(s: str) -> str:
+    return s.lower().strip().replace("-", " ").replace("_", " ")
+
+def _is_correct(guess: str, correct: str) -> bool:
+    g = _normalize(guess)
+    c = _normalize(correct)
+
+    if g == c:
+        return True
+
+    g_parts = g.split()
+    c_parts = c.split()
+
+    if sorted(g_parts) == sorted(c_parts):
+        return True
+
+    if len(c_parts) > 1 and g == c_parts[0]:
+        return True
+
+    if len(g_parts) >= 2 and all(p in c_parts for p in g_parts):
+        return True
+
+    return False
+
+
 # ── DB helpers ────────────────────────────────────────────────────────────────
-async def add_waifu_to_collection(user_id: int, username: str, first_name: str, waifu: dict):
+async def _add_to_collection(user_id: int, username: str, first_name: str, waifu: dict):
     await collectiondb.update_one(
         {"user_id": user_id},
         {
-            "$set": {"username": username, "first_name": first_name},
+            "$set":  {"username": username, "first_name": first_name},
             "$push": {"waifus": waifu},
         },
         upsert=True,
     )
 
-async def add_coins(user_id: int, amount: int) -> int:
+async def _add_coins(user_id: int, amount: int) -> int:
     result = await balancedb.find_one_and_update(
         {"user_id": user_id},
         {"$inc": {"coins": amount}},
@@ -70,7 +102,7 @@ async def add_coins(user_id: int, amount: int) -> int:
     )
     return (result or {}).get("coins", amount)
 
-async def increment_guesses(user_id: int):
+async def _inc_guesses(user_id: int):
     await game_statsdb.update_one(
         {"user_id": user_id},
         {"$inc": {"total_guesses": 1}},
@@ -78,131 +110,144 @@ async def increment_guesses(user_id: int):
     )
 
 
-# ── Send waifu to group ───────────────────────────────────────────────────────
-async def send_waifu(client: Client, chat_id: int):
-    """Fetch random waifu from API and send to group."""
-    waifu = await get_random_waifu()
-    if not waifu:
-        return
-
-    rarity = waifu.get("rarity", "Common")
-    emoji = RARITY_EMOJI.get(rarity, "◈")
-
-    caption = (
-        f"<blockquote>🌸 <b>A wild waifu appeared!</b>\n"
-        f"{emoji} <b>Rarity:</b> {rarity}</blockquote>\n\n"
-        f"<i>Can you guess her name? Use /guess &lt;name&gt;</i>"
-    )
-
-    try:
-        msg = await client.send_photo(
-            chat_id=chat_id,
-            photo=waifu["img_url"],
-            caption=caption,
-            parse_mode=enums.ParseMode.HTML,
-        )
-
-        active_spawns[chat_id] = {
-            **waifu,
-            "message_id": msg.id,
-            "timestamp": time.time(),
-        }
-        guessed_chats.discard(chat_id)
-
-        # Auto runaway after timeout
-        await asyncio.sleep(WAIFU_TIMEOUT)
-        if chat_id in active_spawns and active_spawns[chat_id].get("message_id") == msg.id:
-            active_spawns.pop(chat_id, None)
-            await client.send_message(
-                chat_id,
-                f"💨 <b>The waifu ran away!</b> Nobody guessed her in time~",
-                parse_mode=enums.ParseMode.HTML,
-            )
-    except Exception as e:
-        pass
-
-
-# ── /guess Command ────────────────────────────────────────────────────────────
+# ── /guess handler ────────────────────────────────────────────────────────────
 @app.on_message(filters.command(["guess", "grab", "hunt", "collect", "protecc"]))
 async def guess_handler(client: Client, message: Message):
     chat_id = message.chat.id
-    user_id = message.from_user.id
+    user    = message.from_user
+    user_id = user.id
 
-    # Cooldown check
-    if is_on_cooldown(user_id):
+    mention = f"<a href='tg://user?id={user_id}'>{escape(user.first_name)}</a>"
+
+    # ── Spam block check ──────────────────────────────────────────────────────
+    block_remaining = _spam_blocked(chat_id, user_id)
+    if block_remaining:
+        mins     = block_remaining // 60
+        secs     = block_remaining % 60
+        time_str = f"{mins}m {secs}s" if mins else f"{secs}s"
         return await message.reply_text(
-            f"⏳ Cooldown! Wait <b>{remaining_cooldown(user_id)}s</b>",
+            f"<blockquote>"
+            f"<emoji id='5998834801472182366'>🚫</emoji> "
+            f"<b>{sc('You are blocked from guessing')}!</b>\n\n"
+            f"{sc('Reason')} : {sc('Spamming messages in this group')}.\n"
+            f"{sc('Unblocks in')} : <b>{time_str}</b>\n\n"
+            f"<i>{sc('Stop spamming and wait for the timer to expire')}.</i>"
+            f"</blockquote>",
             parse_mode=enums.ParseMode.HTML,
         )
 
-    # No active waifu
+    # ── Guess cooldown ────────────────────────────────────────────────────────
+    if _on_cooldown(user_id):
+        return await message.reply_text(
+            f"<blockquote>"
+            f"⏳ <b>{sc('Cooldown')}!</b> "
+            f"{sc('Wait')} <b>{_remaining_cd(user_id)}s</b> {sc('before guessing again')}."
+            f"</blockquote>",
+            parse_mode=enums.ParseMode.HTML,
+        )
+
+    # ── No active waifu ───────────────────────────────────────────────────────
     if chat_id not in active_spawns:
-        return await message.reply_text("❌ No waifu to guess right now!")
+        return await message.reply_text(
+            f"<blockquote>"
+            f"<emoji id='6001602353843672777'>⚠️</emoji> "
+            f"<b>{sc('No waifu is active right now')}!</b>\n"
+            f"<i>{sc('Wait for one to spawn')}~</i>"
+            f"</blockquote>",
+            parse_mode=enums.ParseMode.HTML,
+        )
 
-    # Already guessed
+    # ── Already guessed ───────────────────────────────────────────────────────
     if chat_id in guessed_chats:
-        return await message.reply_text("❌ This waifu was already guessed!")
+        return await message.reply_text(
+            f"<blockquote>"
+            f"<emoji id='5998834801472182366'>❌</emoji> "
+            f"<b>{sc('This waifu was already claimed')}!</b>"
+            f"</blockquote>",
+            parse_mode=enums.ParseMode.HTML,
+        )
 
-    guess = " ".join(message.command[1:]).strip().lower()
+    # ── No name provided ──────────────────────────────────────────────────────
+    guess = " ".join(message.command[1:]).strip()
     if not guess:
-        return await message.reply_text("Usage: <code>/guess &lt;name&gt;</code>", parse_mode=enums.ParseMode.HTML)
+        return await message.reply_text(
+            f"<blockquote>"
+            f"<emoji id='6001602353843672777'>⚠️</emoji> "
+            f"<b>{sc('Usage')} :</b> <code>/guess &lt;name&gt;</code>"
+            f"</blockquote>",
+            parse_mode=enums.ParseMode.HTML,
+        )
 
-    waifu = active_spawns[chat_id]
-    correct_name = waifu["name"].lower()
-    name_parts = correct_name.split()
+    waifu        = active_spawns[chat_id]
+    correct_name = waifu.get("name", "")
+    rarity       = waifu.get("rarity", "Common")
+    emoji        = RARITY_EMOJI.get(rarity, "◈")
+    waifu_id     = waifu.get("waifu_id", "N/A")
 
-    is_correct = (
-        guess == correct_name
-        or sorted(guess.split()) == sorted(name_parts)
-        or guess in name_parts
-    )
+    _set_cooldown(user_id)
 
-    set_cooldown(user_id)
-
-    if is_correct:
+    # ── Correct ───────────────────────────────────────────────────────────────
+    if _is_correct(guess, correct_name):
         guessed_chats.add(chat_id)
         active_spawns.pop(chat_id, None)
 
-        time_taken = int(time.time() - waifu.get("timestamp", time.time()))
-        new_balance = await add_coins(user_id, COINS_REWARD)
-        await add_waifu_to_collection(
+        time_taken  = int(time.time() - waifu.get("timestamp", time.time()))
+        new_balance = await _add_coins(user_id, COINS_REWARD)
+
+        await _add_to_collection(
             user_id,
-            message.from_user.username or "",
-            message.from_user.first_name,
-            waifu,
+            user.username or "",
+            user.first_name,
+            {**waifu, "timestamp": time.time()},
         )
-        await increment_guesses(user_id)
+        await _inc_guesses(user_id)
 
-        rarity = waifu.get("rarity", "Common")
-        emoji = RARITY_EMOJI.get(rarity, "◈")
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"🌸 {sc('My Harem')}",
+                switch_inline_query_current_chat=f"col.{user_id}",
+            )
+        ]])
 
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🌸 My Harem", switch_inline_query_current_chat=f"col.{user_id}")]
-        ])
-
-        await safe_reply_photo(
-            message,
+        await message.reply_photo(
             photo=waifu["img_url"],
             caption=(
-                f"<blockquote>🎊 <b><a href='tg://user?id={user_id}'>{escape(message.from_user.first_name)}</a></b> guessed correctly!</blockquote>\n\n"
-                f"📛 <b>Name:</b> {waifu['name']}\n"
-                f"{emoji} <b>Rarity:</b> {rarity}\n"
-                f"🏷 <b>Tag:</b> {waifu.get('event_tag', 'Standard')}\n\n"
-                f"🪙 <b>+{COINS_REWARD} coins</b> → Balance: <b>{new_balance}</b>\n"
-                f"⏱ Time: <b>{time_taken}s</b>"
+                f"<blockquote>"
+                f"<emoji id='6291837599254322363'>🎊</emoji> "
+                f"<b>{mention} {sc('guessed correctly')}!</b>"
+                f"</blockquote>\n\n"
+                f"<b>📛 {sc('Name')} :</b> {escape(correct_name)}\n"
+                f"<b>{emoji} {sc('Rarity')} :</b> {rarity}\n"
+                f"<b>🏷 {sc('Tag')} :</b> {waifu.get('event_tag', 'Standard')}\n"
+                f"<b>🆔 {sc('ID')} :</b> <code>{waifu_id}</code>\n\n"
+                f"<b>🌸 +{COINS_REWARD} {sc('Sakura')} →</b> "
+                f"<b>{new_balance:,} 🌸</b>\n"
+                f"<b>⏱ {sc('Time')} :</b> <b>{time_taken}s</b>"
             ),
-            reply_markup=keyboard,
-        )
-    else:
-        msg_id = waifu.get("message_id")
-        keyboard = None
-        if msg_id:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("👀 View Again", url=f"https://t.me/c/{str(chat_id)[4:]}/{msg_id}")]
-            ])
-        await message.reply_text(
-            "❌ <b>Wrong!</b> Try again~ 🕵️",
             parse_mode=enums.ParseMode.HTML,
             reply_markup=keyboard,
         )
 
+    # ── Wrong ─────────────────────────────────────────────────────────────────
+    else:
+        msg_id   = waifu.get("message_id")
+        keyboard = None
+        if msg_id:
+            safe_cid = str(chat_id).replace("-100", "")
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    f"👀 {sc('View Waifu')}",
+                    url=f"https://t.me/c/{safe_cid}/{msg_id}",
+                )
+            ]])
+
+        await message.reply_text(
+            f"<blockquote>"
+            f"<emoji id='5998834801472182366'>❌</emoji> "
+            f"<b>{sc('Wrong')}!</b> "
+            f"{sc('Try again')}~ 🕵️"
+            f"</blockquote>",
+            parse_mode=enums.ParseMode.HTML,
+            reply_markup=keyboard,
+    )
+        
