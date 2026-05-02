@@ -15,8 +15,10 @@ from YUKIWAFUS import app
 from YUKIWAFUS.database.Mangodb import collectiondb, balancedb, game_statsdb
 from YUKIWAFUS.utils.api import get_random_waifu
 
+# ── Import shared spawn state from spawn.py ───────────────────────────────────
+from YUKIWAFUS.modules.WAIFU.spawn import active_spawns
+
 # ── In-memory state ───────────────────────────────────────────────────────────
-active_waifus: dict = {}       # chat_id → waifu data + meta
 guessed_chats: set = set()     # chat_ids where waifu already guessed
 cooldowns: dict = {}           # user_id → last_guess timestamp
 
@@ -99,7 +101,7 @@ async def send_waifu(client: Client, chat_id: int):
             parse_mode=enums.ParseMode.HTML,
         )
 
-        active_waifus[chat_id] = {
+        active_spawns[chat_id] = {
             **waifu,
             "message_id": msg.id,
             "timestamp": time.time(),
@@ -108,8 +110,8 @@ async def send_waifu(client: Client, chat_id: int):
 
         # Auto runaway after timeout
         await asyncio.sleep(WAIFU_TIMEOUT)
-        if chat_id in active_waifus and active_waifus[chat_id].get("message_id") == msg.id:
-            active_waifus.pop(chat_id, None)
+        if chat_id in active_spawns and active_spawns[chat_id].get("message_id") == msg.id:
+            active_spawns.pop(chat_id, None)
             await client.send_message(
                 chat_id,
                 f"💨 <b>The waifu ran away!</b> Nobody guessed her in time~",
@@ -133,7 +135,7 @@ async def guess_handler(client: Client, message: Message):
         )
 
     # No active waifu
-    if chat_id not in active_waifus:
+    if chat_id not in active_spawns:
         return await message.reply_text("❌ No waifu to guess right now!")
 
     # Already guessed
@@ -144,7 +146,7 @@ async def guess_handler(client: Client, message: Message):
     if not guess:
         return await message.reply_text("Usage: <code>/guess &lt;name&gt;</code>", parse_mode=enums.ParseMode.HTML)
 
-    waifu = active_waifus[chat_id]
+    waifu = active_spawns[chat_id]
     correct_name = waifu["name"].lower()
     name_parts = correct_name.split()
 
@@ -158,7 +160,7 @@ async def guess_handler(client: Client, message: Message):
 
     if is_correct:
         guessed_chats.add(chat_id)
-        active_waifus.pop(chat_id, None)
+        active_spawns.pop(chat_id, None)
 
         time_taken = int(time.time() - waifu.get("timestamp", time.time()))
         new_balance = await add_coins(user_id, COINS_REWARD)
