@@ -14,6 +14,7 @@ from YUKIWAFUS import app
 from YUKIWAFUS.database.Mangodb import collectiondb, balancedb
 from YUKIWAFUS.utils.api import get_random_waifu
 from YUKIWAFUS.utils.helpers import sc
+from YUKIWAFUS.utils.safe_photo import safe_reply_photo
 
 CLAIM_COOLDOWN = config.CLAIM_COOLDOWN  # 86400 = 24h
 CLAIM_COINS    = 50
@@ -130,7 +131,8 @@ async def hclaim_handler(client: Client, message: Message):
             ]
         ])
 
-        await message.reply_photo(
+        await safe_reply_photo(
+            message,
             photo=waifu["img_url"],
             caption=(
                 f"<blockquote>🎊 <b>{sc('Daily Claim')}!</b></blockquote>\n\n"
@@ -141,7 +143,6 @@ async def hclaim_handler(client: Client, message: Message):
                 f"🪙 <b>+{CLAIM_COINS} {sc('coins')}</b> → {sc('Balance')}: <b>{new_balance}</b>\n\n"
                 f"<i>{sc('Come back tomorrow for another claim')}~</i>"
             ),
-            parse_mode=enums.ParseMode.HTML,
             reply_markup=keyboard,
         )
 
