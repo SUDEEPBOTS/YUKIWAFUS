@@ -283,21 +283,70 @@ async def help_private_cmd(client: Client, message: Message):
     except Exception:
         pass
 
+    chat_id = message.chat.id
+    markup  = {"inline_keyboard": _help_main_panel(back_to_start=False)}
+
+    # ── Try 1: photo via raw Bot API ──────────────────────────────────────────
     res = await _bot_api("sendPhoto", {
-        "chat_id":     message.chat.id,
+        "chat_id":     chat_id,
         "photo":       config.WAIFU_PICS[0],
         "caption":     _HELP_CAPTION,
         "parse_mode":  "HTML",
         "has_spoiler": True,
     })
-
     if res.get("ok"):
         msg_id = res["result"]["message_id"]
         await _bot_api("editMessageReplyMarkup", {
-            "chat_id":      message.chat.id,
+            "chat_id":      chat_id,
             "message_id":   msg_id,
-            "reply_markup": {"inline_keyboard": _help_main_panel(back_to_start=False)},
+            "reply_markup": markup,
         })
+        return
+
+    # ── Try 2: photo via Pyrogram ─────────────────────────────────────────────
+    try:
+        rows = []
+        for row in _help_main_panel(back_to_start=False):
+            r = []
+            for b in row:
+                if b.get("callback_data"):
+                    r.append(InlineKeyboardButton(b["text"], callback_data=b["callback_data"]))
+                elif b.get("url"):
+                    r.append(InlineKeyboardButton(b["text"], url=b["url"]))
+            if r:
+                rows.append(r)
+        await client.send_photo(
+            chat_id,
+            photo=config.WAIFU_PICS[0],
+            caption=_HELP_CAPTION,
+            parse_mode=enums.ParseMode.HTML,
+            has_spoiler=True,
+            reply_markup=InlineKeyboardMarkup(rows) if rows else None,
+        )
+        return
+    except Exception:
+        pass
+
+    # ── Try 3: text fallback (no photo) — last resort ─────────────────────────
+    try:
+        rows = []
+        for row in _help_main_panel(back_to_start=False):
+            r = []
+            for b in row:
+                if b.get("callback_data"):
+                    r.append(InlineKeyboardButton(b["text"], callback_data=b["callback_data"]))
+                elif b.get("url"):
+                    r.append(InlineKeyboardButton(b["text"], url=b["url"]))
+            if r:
+                rows.append(r)
+        await client.send_message(
+            chat_id,
+            _HELP_CAPTION,
+            parse_mode=enums.ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(rows) if rows else None,
+        )
+    except Exception:
+        pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -305,15 +354,26 @@ async def help_private_cmd(client: Client, message: Message):
 # ══════════════════════════════════════════════════════════════════════════════
 @app.on_message(filters.command("help") & filters.group)
 async def help_group_cmd(client: Client, message: Message):
-    await message.reply_text(
-        f"<blockquote>"
-        f"<emoji id='6291837599254322363'>🌸</emoji> "
-        f"<b>{sc('Help is available in DM')}!</b>"
-        f"</blockquote>\n\n"
-        f"<i>{sc('Click the button below to get full help menu')}~</i>",
-        parse_mode=enums.ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(_group_help_panel()),
-    )
+    try:
+        bot_username = (await client.get_me()).username or ""
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                "˹ ʜᴇʟᴘ ɪɴ ᴅᴍ ˼",
+                url=f"https://t.me/{bot_username}?start=help",
+            )
+        ]]) if bot_username else None
+
+        await message.reply_text(
+            f"<blockquote>"
+            f"<emoji id='6291837599254322363'>🌸</emoji> "
+            f"<b>{sc('Help is available in DM')}!</b>"
+            f"</blockquote>\n\n"
+            f"<i>{sc('Click the button below to get full help menu')}~</i>",
+            parse_mode=enums.ParseMode.HTML,
+            reply_markup=keyboard,
+        )
+    except Exception:
+        pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
